@@ -1,0 +1,232 @@
+use strict;
+use DBI;
+use File::Find;
+use Netcool;
+
+use Env qw(OMNIHOME NCHOME);
+
+my $driver   = "SQLite";
+my $database = "netcool_rules.db";
+my $dsn = "DBI:$driver:dbname=$database";
+my $userid = "";
+my $password = "";
+my $dbh = DBI->connect($dsn, $userid, $password, { RaiseError => 1 }) or die $DBI::errstr;
+
+my $nckl_rule_path = "";
+my $updated_rules = "";
+my $sev = "";
+my $eventid = "";
+my $discard = "";
+my $alertid = "";
+my $expiretime = "";
+my $processid = "";
+
+sub getByEvtId {
+
+  # Input: eventid/alarmid from Netcool
+  # Return: nckl path, eventid, alarmid, severity, discard flag, process id, expiretime
+
+  my ($input) = @_;
+  chomp($input);
+
+  my $stmt = qq(SELECT eventchanges.EventId,eventchanges.AlertId,
+                eventchanges.Severity, eventchanges.Discard,
+                eventchanges.ProcessId, eventchanges.ExpireTime, eventlist.Path FROM eventchanges,eventlist
+                WHERE eventchanges.EventId = "$input" AND eventlist.Path LIKE '%perl%';);
+
+  my $sth = $dbh->prepare($stmt);
+  my $rv = $sth->execute() or die $DBI::errstr;
+  if($rv < 0){
+    print $DBI::errstr;
+  }
+  while(my @row = $sth->fetchrow_array()) {
+   $eventid = $row[0];
+   $alertid = $row[1];
+   $sev = $row[2];
+   $discard = $row[3];
+   $processid = $row[4];
+   $expiretime = $row[5];
+   $nckl_rule_path = $row[6];
+   $updated_rules = $nckl_rule_path . ".new";
+  }
+
+
+}
+
+sub update_rule_sev {
+
+  # Input: rules file path
+
+  ######################################################################################
+  #
+  # This function uses the severity value stored in eventchanges table for an EventId
+  # to update the <AlertId>_Severity value. It comments out existing variable in rules,
+  # and then appends updated variable below
+  #
+  ######################################################################################
+ my ($input) = @_;
+  chomp($input);
+
+  my $tmp_evt = "";
+  print "Rules: $input\n";
+
+  open FILE, "$input" or die "Can't open : $!";
+  open FILE2, '>', "$updated_rules" or die "Can't open : $!";
+  my $tmpword = uc $eventid;
+  my $sevline = $tmpword . "_Severity";
+  print "$sevline\n";
+
+  foreach my $LINE (<FILE>) {
+    if($LINE=~/($sevline).*=.*(\d{1})/) {
+      chomp($LINE);
+      print FILE2 "\n";
+      print FILE2 "\t    ## MODIFIED <DATE> BY <TOOL/USER>\n";
+      print FILE2 "\t    ## $LINE\n";
+      print FILE2 "\t    \$$1 = $sev\n";
+      print FILE2 "\t    ## END MODIFICATION\n";
+      print FILE2 "\n";
+    } else {
+      print FILE2 $LINE;
+    }
+
+  }
+
+  close(FILE);
+  close(FILE2);
+}
+
+sub update_expire_time {
+
+  my ($input) = @_;
+  chomp($input);
+  my $tmp_evt = "";
+  open FILE, "$input" or die "Can't open : $!";
+  open FILE2, '>', "$updated_rules" or die "Can't open : $!";
+  my $tmpword = uc $eventid;
+  my $expireline = $tmpword . "_ExpireTime";
+  print "$expireline\n";
+
+  foreach my $LINE (<FILE>) {
+    if($LINE=~/($expireline).*=.*(\d{1})/) {
+      chomp($LINE);
+      print FILE2 "\n";
+      print FILE2 "\t    ## MODIFIED <DATE> BY <TOOL/USER>\n";
+      print FILE2 "\t    ## $LINE\n";
+      print FILE2 "\t    \$$1 = $sev\n";
+      print FILE2 "\t    ## END MODIFICATION\n";
+      print FILE2 "\n";
+
+    } else {
+      print FILE2 $LINE;
+    }
+
+  }
+
+  close(FILE);
+  close(FILE2);
+
+
+
+
+}
+
+sub update_discard_flag {
+ my ($input) = @_;
+  chomp($input);
+  my $tmp_evt = "";
+  open FILE, "$input" or die "Can't open : $!";
+  open FILE2, '>', "$updated_rules" or die "Can't open : $!";
+  my $tmpword = uc $eventid;
+  my $sevline = $tmpword . "_Severity";
+  print "$sevline\n";
+
+  foreach my $LINE (<FILE>) {
+    if($LINE=~/($sevline).*=.*(\d{1})/) {
+      chomp($LINE);
+      print FILE2 "\n";
+      print FILE2 "\t    ## MODIFIED <DATE> BY <TOOL/USER>\n";
+      print FILE2 "\t    ## Original: $LINE\n";
+      print FILE2 "\t    \$$1 = $sev\n";
+      print FILE2 "\t    ## END MODIFICATION\n";
+      print FILE2 "\n";
+
+    } else {
+      print FILE2 $LINE;
+    }
+
+  }
+
+  close(FILE);
+  close(FILE2);
+
+
+
+}
+
+sub update_processId {
+
+  my ($input) = @_;
+  chomp($input);
+  my $tmp_evt = "";
+  open FILE, "$input" or die "Can't open : $!";
+  open FILE2, '>', "rules.new" or die "Can't open : $!";
+  my $tmpword = uc $eventid;
+  my $sevline = $tmpword . "_Severity";
+  print "$sevline\n";
+
+  foreach my $LINE (<FILE>) {
+    if($LINE=~/($sevline).*=.*(\d{1})/) {
+      chomp($LINE);
+      print FILE2 "\t    ## MODIFIED <DATE> BY <USERID>##\n";
+      print FILE2 "\t    ##$LINE\n";
+      print FILE2 "\t    \$$1 = $sev\n";
+      print FILE2 "\t    ## END MODIFICATION ############\n";
+    } else {
+      print FILE2 $LINE;
+    }
+
+  }
+
+  close(FILE);
+  close(FILE2);
+
+
+}
+
+sub update_ownergid {
+
+  my ($input) = @_;
+  chomp($input);
+  my $tmp_evt = "";
+ open FILE, "$input" or die "Can't open : $!";
+  open FILE2, '>', "rules.new" or die "Can't open : $!";
+  my $tmpword = uc $eventid;
+  my $sevline = $tmpword . "_Severity";
+  print "$sevline\n";
+
+  foreach my $LINE (<FILE>) {
+    if($LINE=~/($sevline).*=.*(\d{1})/) {
+      chomp($LINE);
+      print FILE2 "\t    ## MODIFIED <DATE> BY <USERID>##\n";
+      print FILE2 "\t    ##$LINE\n";
+      print FILE2 "\t    \$$1 = $sev\n";
+      print FILE2 "\t    ## END MODIFICATION ############\n";
+    } else {
+      print FILE2 $LINE;
+    }
+
+  }
+
+  close(FILE);
+  close(FILE2);
+
+
+}
+# Retrieve rules file path from oracle table
+&getByEvtId("rpsFailed");
+# Update this rules file sev
+&update_rule_sev("$nckl_rule_path");
+
+
+
+$dbh->disconnect();
